@@ -1,5 +1,5 @@
-# kellermeister-dashboard
-Dashboard for the Kellermeister App
+# Kellermeister-Dashboard
+Dashboard for exported data from the Kellermeister App
 
 Dashboard to visualize data on a small website. The data can be exported from the app https://keller-meister.blogspot.com/ and then imported on this website.
 
