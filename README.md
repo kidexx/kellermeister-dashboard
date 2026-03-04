@@ -2,4 +2,4 @@
 Dashboard for the Kellermeister App
 
 Pictures:
-![Dashboard](readme\dashboard.png)
+![Dashboard](readme/dashboard.png)
