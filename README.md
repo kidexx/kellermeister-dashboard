@@ -1,6 +1,12 @@
 # kellermeister-dashboard
 Dashboard for the Kellermeister App
 
+Dashboard to visualize data on a small website. The data can be exported from the app https://keller-meister.blogspot.com/ and then imported on this website.
+
+Currently only in German
+
+Requirements: Webserver with PHP + MariaDB
+
 Setup:
 - mysql < setup.sql
 - Adjust DB credentials and upload password in config.php
