@@ -65,3 +65,18 @@ CREATE TABLE IF NOT EXISTS import_log (
     zeilen_aktualisiert INT DEFAULT 0,
     importiert_am DATETIME DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Neue Tabelle für Kellerwert-Verlauf
+CREATE TABLE IF NOT EXISTS keller_snapshots (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    datum DATE NOT NULL,
+    gesamt_flaschen INT NOT NULL DEFAULT 0,
+    verschiedene_weine INT NOT NULL DEFAULT 0,
+    kellerwert DECIMAL(10,2) NOT NULL DEFAULT 0,
+    durchschnitt_preis DECIMAL(8,2) DEFAULT NULL,
+    durchschnitt_bewertung DECIMAL(3,1) DEFAULT NULL,
+    laender INT NOT NULL DEFAULT 0,
+    favoriten INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY idx_datum (datum)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
