@@ -11,6 +11,7 @@ define('DB_CHARSET', 'utf8mb4');
 
 // Passwort für den Import-Bereich
 define('IMPORT_PASSWORD', 'changeme');
+define('SNAPSHOT_KEY', 'changeme');
 
 function getDB(): PDO {
     static $pdo = null;
