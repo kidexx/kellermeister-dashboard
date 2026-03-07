@@ -149,6 +149,221 @@ switch ($action) {
         echo json_encode(['summary' => $summary, 'details' => $issues]);
         break;
 
+    case 'preislookup':
+        $id = (int) ($_GET['id'] ?? 0);
+        if (!$id) { echo json_encode(['error' => 'Keine ID']); break; }
+
+        $stmt = $db->prepare("SELECT name, jahrgang, hersteller, rebsorte, land, preis FROM weine WHERE id = ?");
+        $stmt->execute([$id]);
+        $wein = $stmt->fetch();
+        if (!$wein) { echo json_encode(['error' => 'Wein nicht gefunden']); break; }
+
+        // Suchbegriff zusammenbauen
+        $parts = array_filter([
+            $wein['name'],
+            $wein['hersteller'],
+            $wein['jahrgang'],
+        ]);
+        $query = implode(' ', $parts);
+        $queryEnc = urlencode($query);
+        $queryWein = urlencode($query . ' Wein kaufen');
+
+        $result = [
+            'wein' => $wein,
+            'suchbegriff' => $query,
+            'links' => [
+                [
+                    'name' => 'Wine-Searcher',
+                    'url' => "https://www.wine-searcher.com/find/$queryEnc",
+                    'icon' => '🔍'
+                ],
+                [
+                    'name' => 'Vivino',
+                    'url' => "https://www.vivino.com/search/wines?q=$queryEnc",
+                    'icon' => '🍷'
+                ],
+                [
+                    'name' => 'Google Shopping',
+                    'url' => "https://www.google.com/search?tbm=shop&q=$queryWein",
+                    'icon' => '🛒'
+                ],
+                [
+                    'name' => 'idealo',
+                    'url' => "https://www.idealo.de/preisvergleich/MainSearchProductCategory.html?q=$queryEnc",
+                    'icon' => '💶'
+                ],
+            ]
+        ];
+
+        echo json_encode($result);
+        break;
+
+    case 'analysen':
+        $base = "FROM weine WHERE anzahl > 0 AND geloescht = 0";
+        $analysen = [];
+
+        // 1. Preis-Leistungs-Champions (beste Bewertung pro Euro)
+        $analysen['preis_leistung'] = $db->query("
+            SELECT name, jahrgang, preis, bewertung, anzahl, kategorie, land,
+                   ROUND(bewertung / preis, 2) AS score
+            FROM weine 
+            WHERE anzahl > 0 AND geloescht = 0 AND preis > 0 AND bewertung IS NOT NULL
+            ORDER BY score DESC 
+            LIMIT 10
+        ")->fetchAll();
+
+        // 2. Wertvollste Positionen (Preis × Anzahl)
+        $analysen['wertvollste'] = $db->query("
+            SELECT name, jahrgang, preis, anzahl, 
+                   ROUND(preis * anzahl, 2) AS gesamtwert, kategorie, land, hersteller
+            FROM weine 
+            WHERE anzahl > 0 AND geloescht = 0 AND preis > 0
+            ORDER BY gesamtwert DESC 
+            LIMIT 10
+        ")->fetchAll();
+
+        // 3. Trinkreife-Timeline (wann welche Weine trinken)
+        $analysen['trinkreife'] = $db->query("
+            SELECT 
+                CASE 
+                    WHEN trinken_bis < YEAR(NOW()) THEN 'Überfällig!'
+                    WHEN trinken_bis = YEAR(NOW()) THEN 'Dieses Jahr'
+                    WHEN trinken_bis = YEAR(NOW()) + 1 THEN 'Nächstes Jahr'
+                    WHEN trinken_bis <= YEAR(NOW()) + 3 THEN '2-3 Jahre'
+                    WHEN trinken_bis <= YEAR(NOW()) + 5 THEN '4-5 Jahre'
+                    ELSE '5+ Jahre'
+                END AS zeitfenster,
+                COUNT(*) AS weine,
+                SUM(anzahl) AS flaschen,
+                ROUND(SUM(preis * anzahl), 0) AS wert
+            FROM weine 
+            WHERE anzahl > 0 AND geloescht = 0 AND trinken_bis IS NOT NULL
+            GROUP BY zeitfenster
+            ORDER BY MIN(trinken_bis)
+        ")->fetchAll();
+
+        // 4. Wert nach Land
+        $analysen['wert_nach_land'] = $db->query("
+            SELECT land AS label, 
+                   ROUND(SUM(preis * anzahl), 0) AS wert,
+                   SUM(anzahl) AS flaschen,
+                   ROUND(AVG(preis), 2) AS avg_preis,
+                   ROUND(AVG(bewertung), 1) AS avg_bewertung
+            FROM weine 
+            WHERE anzahl > 0 AND geloescht = 0 AND land IS NOT NULL AND preis > 0
+            GROUP BY land 
+            ORDER BY wert DESC 
+            LIMIT 10
+        ")->fetchAll();
+
+        // 5. Wert nach Kategorie (Rot/Weiß/Rosé...)
+        $analysen['wert_nach_kategorie'] = $db->query("
+            SELECT kategorie AS label,
+                   ROUND(SUM(preis * anzahl), 0) AS wert,
+                   SUM(anzahl) AS flaschen,
+                   ROUND(AVG(preis), 2) AS avg_preis,
+                   ROUND(AVG(bewertung), 1) AS avg_bewertung
+            FROM weine 
+            WHERE anzahl > 0 AND geloescht = 0 AND kategorie IS NOT NULL AND preis > 0
+            GROUP BY kategorie 
+            ORDER BY wert DESC
+        ")->fetchAll();
+
+        // 6. Preissegmente
+        $analysen['preissegmente'] = $db->query("
+            SELECT 
+                CASE 
+                    WHEN preis < 5 THEN '< 5€'
+                    WHEN preis < 10 THEN '5-10€'
+                    WHEN preis < 20 THEN '10-20€'
+                    WHEN preis < 50 THEN '20-50€'
+                    WHEN preis < 100 THEN '50-100€'
+                    ELSE '100€+'
+                END AS segment,
+                COUNT(*) AS weine,
+                SUM(anzahl) AS flaschen,
+                ROUND(SUM(preis * anzahl), 0) AS wert,
+                ROUND(AVG(bewertung), 1) AS avg_bewertung
+            FROM weine 
+            WHERE anzahl > 0 AND geloescht = 0 AND preis > 0
+            GROUP BY segment
+            ORDER BY MIN(preis)
+        ")->fetchAll();
+
+        // 7. Jahrzehnt-Analyse
+        $analysen['jahrzehnte'] = $db->query("
+            SELECT CONCAT(FLOOR(jahrgang/10)*10, 'er') AS jahrzehnt,
+                   COUNT(*) AS weine,
+                   SUM(anzahl) AS flaschen,
+                   ROUND(AVG(preis), 2) AS avg_preis,
+                   ROUND(AVG(bewertung), 1) AS avg_bewertung,
+                   ROUND(SUM(preis * anzahl), 0) AS wert
+            FROM weine 
+            WHERE anzahl > 0 AND geloescht = 0 AND jahrgang IS NOT NULL
+            GROUP BY jahrzehnt
+            ORDER BY MIN(jahrgang) DESC
+        ")->fetchAll();
+
+        // 8. Alkohol-Verteilung
+        $analysen['alkohol'] = $db->query("
+            SELECT ROUND(alkohol, 0) AS label, COUNT(*) AS value
+            FROM weine 
+            WHERE anzahl > 0 AND geloescht = 0 AND alkohol IS NOT NULL AND alkohol > 0
+            GROUP BY label 
+            ORDER BY label
+        ")->fetchAll();
+
+        // 9. Diversitäts-Score
+        $div = [];
+        $div['rebsorten'] = (int) $db->query("SELECT COUNT(DISTINCT rebsorte) FROM weine WHERE anzahl > 0 AND geloescht = 0 AND rebsorte IS NOT NULL")->fetchColumn();
+        $div['laender'] = (int) $db->query("SELECT COUNT(DISTINCT land) FROM weine WHERE anzahl > 0 AND geloescht = 0 AND land IS NOT NULL")->fetchColumn();
+        $div['regionen'] = (int) $db->query("SELECT COUNT(DISTINCT region) FROM weine WHERE anzahl > 0 AND geloescht = 0 AND region IS NOT NULL")->fetchColumn();
+        $div['hersteller'] = (int) $db->query("SELECT COUNT(DISTINCT hersteller) FROM weine WHERE anzahl > 0 AND geloescht = 0 AND hersteller IS NOT NULL")->fetchColumn();
+        $div['jahrgaenge'] = (int) $db->query("SELECT COUNT(DISTINCT jahrgang) FROM weine WHERE anzahl > 0 AND geloescht = 0 AND jahrgang IS NOT NULL")->fetchColumn();
+        $analysen['diversitaet'] = $div;
+
+        echo json_encode($analysen);
+        break;
+
+    case 'kellerwert_verlauf':
+        $zeitraum = $_GET['zeitraum'] ?? '1y';
+        $interval = match($zeitraum) {
+            '1m'  => '1 MONTH',
+            '3m'  => '3 MONTH',
+            '6m'  => '6 MONTH',
+            '1y'  => '1 YEAR',
+            '2y'  => '2 YEAR',
+            'all' => '100 YEAR',
+            default => '1 YEAR',
+        };
+        
+        $stmt = $db->prepare("
+            SELECT datum, kellerwert, gesamt_flaschen, verschiedene_weine, 
+                   durchschnitt_preis, durchschnitt_bewertung
+            FROM keller_snapshots 
+            WHERE datum >= DATE_SUB(CURDATE(), INTERVAL $interval)
+            ORDER BY datum ASC
+        ");
+        $stmt->execute();
+        $data = $stmt->fetchAll();
+        
+        // Veränderung berechnen
+        $result = ['snapshots' => $data];
+        if (count($data) >= 2) {
+            $first = $data[0];
+            $last = $data[count($data) - 1];
+            $result['veraenderung'] = [
+                'kellerwert' => round($last['kellerwert'] - $first['kellerwert'], 2),
+                'kellerwert_pct' => $first['kellerwert'] > 0 
+                    ? round(($last['kellerwert'] - $first['kellerwert']) / $first['kellerwert'] * 100, 1) 
+                    : null,
+                'flaschen' => $last['gesamt_flaschen'] - $first['gesamt_flaschen'],
+                'zeitraum_tage' => (strtotime($last['datum']) - strtotime($first['datum'])) / 86400,
+            ];
+        }
+        echo json_encode($result);
+        break;
+
     default:
         echo json_encode(['error' => 'Unbekannte Aktion']);
 }

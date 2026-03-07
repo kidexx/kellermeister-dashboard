@@ -83,6 +83,26 @@ tr:hover { background: rgba(233,69,96,0.1); }
     table { font-size: 0.8em; }
     th, td { padding: 6px 8px; }
 }
+
+/* Preis-Lookup Modal */
+.modal-overlay { position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:1000;display:flex;justify-content:center;align-items:center; }
+.modal { background:var(--card);border-radius:12px;padding:24px;max-width:500px;width:90%;border:1px solid var(--accent);position:relative; }
+.modal h3 { color:var(--accent);margin-bottom:4px; }
+.modal .subtitle { color:var(--muted);font-size:0.85em;margin-bottom:16px; }
+.modal-close { position:absolute;top:12px;right:16px;background:none;border:none;color:var(--muted);font-size:1.5em;cursor:pointer; }
+.modal-close:hover { color:var(--text); }
+.lookup-links { display:grid;gap:10px; }
+.lookup-link { display:flex;align-items:center;gap:12px;background:rgba(0,0,0,0.3);padding:14px 16px;border-radius:8px;text-decoration:none;color:var(--text);transition:all 0.2s;border:1px solid transparent; }
+.lookup-link:hover { border-color:var(--accent);background:rgba(233,69,96,0.1); }
+.lookup-link .ll-icon { font-size:1.5em; }
+.lookup-link .ll-name { font-weight:bold; }
+.lookup-link .ll-desc { font-size:0.8em;color:var(--muted); }
+.lookup-link .ll-arrow { margin-left:auto;color:var(--muted); }
+
+/* Preis-Button in Tabelle */
+.price-btn { background:none;border:1px solid var(--accent2);color:var(--muted);border-radius:4px;padding:2px 6px;cursor:pointer;font-size:0.8em;margin-left:4px; }
+.price-btn:hover { border-color:var(--accent);color:var(--accent); }
+
 </style>
 </head>
 <body>
@@ -93,8 +113,20 @@ tr:hover { background: rgba(233,69,96,0.1); }
     <a onclick="showTab('weine')">🍾 Alle Weine</a>
     <a onclick="showTab('empfehlung')">🥂 Empfehlung</a>
     <a onclick="showTab('qualitaet')">🔍 Datenqualität</a>
+    <a onclick="showTab('analysen')">🔬 Analysen</a>
+    <a onclick="showTab('verlauf')">📈 Kellerwert</a>
     <a href="import.php">📤 XML Import</a>
 </nav>
+
+<div id="lookup-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeLookup()">
+    <div class="modal">
+        <button class="modal-close" onclick="closeLookup()">&times;</button>
+        <h3 id="lookup-name"></h3>
+        <div class="subtitle" id="lookup-detail"></div>
+        <div id="lookup-current" style="margin-bottom:16px;padding:10px;background:rgba(0,0,0,0.2);border-radius:6px;"></div>
+        <div class="lookup-links" id="lookup-links"></div>
+    </div>
+</div>
 
 <div class="container">
 
@@ -162,7 +194,90 @@ tr:hover { background: rgba(233,69,96,0.1); }
         <div id="dq-details"></div>
     </div>
 
+    <!-- KELLERWERT VERLAUF -->
+    <div id="tab-verlauf" class="hidden">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px;">
+            <h2 style="color:var(--accent);margin:0;">📈 Kellerwert-Verlauf</h2>
+            <div style="display:flex;gap:8px;align-items:center;">
+                <select id="verlauf-zeitraum" onchange="loadVerlauf()" style="background:var(--card);color:var(--text);border:1px solid var(--accent2);padding:8px 12px;border-radius:6px;">
+                    <option value="1m">1 Monat</option>
+                    <option value="3m">3 Monate</option>
+                    <option value="6m">6 Monate</option>
+                    <option value="1y" selected>1 Jahr</option>
+                    <option value="2y">2 Jahre</option>
+                    <option value="all">Alles</option>
+                </select>
+                <button class="btn" onclick="doSnapshot()" title="Aktuellen Stand jetzt erfassen">📸 Snapshot</button>
+            </div>
+        </div>
+        <div class="stats-grid" id="verlauf-stats"></div>
+        <div class="charts-grid">
+            <div class="chart-card" style="grid-column: 1 / -1;">
+                <h3>Kellerwert (€)</h3>
+                <canvas id="chart-verlauf-wert"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>Flaschen gesamt</h3>
+                <canvas id="chart-verlauf-flaschen"></canvas>
+            </div>
+            <div class="chart-card">
+                <h3>Ø Flaschenwert (€)</h3>
+                <canvas id="chart-verlauf-avg"></canvas>
+            </div>
+        </div>
+        <p id="verlauf-empty" class="hidden" style="text-align:center;color:var(--muted);padding:40px;">
+            Noch keine Snapshots vorhanden. Klicke auf "📸 Snapshot" um den ersten zu erstellen,<br>
+            oder richte einen Cronjob ein: <code>0 3 * * * php /pfad/zu/snapshot.php</code>
+        </p>
+    </div>
+	
     <!-- Upload is now at import.php -->
+    <!-- ANALYSEN -->
+    <div id="tab-analysen" class="hidden">
+        <h2 style="color:var(--accent);margin-bottom:20px;">🔬 Keller-Analysen</h2>
+
+        <!-- Diversitäts-Score -->
+        <div class="stats-grid" id="div-stats"></div>
+
+        <!-- Trinkreife-Timeline -->
+        <div class="chart-card" style="margin-bottom:20px;">
+            <h3>⏰ Trinkreife-Timeline</h3>
+            <div id="trinkreife-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:12px;"></div>
+        </div>
+
+        <!-- Charts Row -->
+        <div class="charts-grid">
+            <div class="chart-card"><h3>💰 Wert nach Land</h3><canvas id="chart-wert-land"></canvas></div>
+            <div class="chart-card"><h3>🍷 Wert nach Kategorie</h3><canvas id="chart-wert-kat"></canvas></div>
+            <div class="chart-card"><h3>💶 Preissegmente (Flaschen)</h3><canvas id="chart-preisseg"></canvas></div>
+            <div class="chart-card"><h3>🥃 Alkohol-Verteilung (%vol)</h3><canvas id="chart-alkohol"></canvas></div>
+        </div>
+
+        <!-- Jahrzehnte -->
+        <div class="chart-card" style="margin:20px 0;">
+            <h3>📅 Nach Jahrzehnt</h3>
+            <div style="overflow-x:auto;">
+                <table style="margin-top:12px;">
+                    <thead><tr><th>Jahrzehnt</th><th>Weine</th><th>Flaschen</th><th>Ø Preis</th><th>Ø Bewertung</th><th>Gesamtwert</th></tr></thead>
+                    <tbody id="jahrzehnt-body"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Preis-Leistung & Wertvollste -->
+        <div class="charts-grid">
+            <div class="chart-card">
+                <h3>🏆 Preis-Leistungs-Champions</h3>
+                <p style="color:var(--muted);font-size:0.8em;margin-bottom:10px;">Beste Bewertung pro Euro</p>
+                <div id="pl-list"></div>
+            </div>
+            <div class="chart-card">
+                <h3>💎 Wertvollste Positionen</h3>
+                <p style="color:var(--muted);font-size:0.8em;margin-bottom:10px;">Preis × Anzahl</p>
+                <div id="wv-list"></div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <script>
@@ -179,6 +294,8 @@ function showTab(name) {
     if (name === 'weine') { loadFilters(); loadWeine(); }
     if (name === 'empfehlung') loadEmpfehlung();
     if (name === 'qualitaet') loadDatenqualitaet();
+    if (name === 'analysen') loadAnalysen();
+    if (name === 'verlauf') loadVerlauf();
 }
 
 // Dashboard
@@ -264,7 +381,7 @@ async function loadWeine() {
         <td>${esc(w.rebsorte || '-')}</td>
         <td>${esc(w.hersteller || '-')}</td>
         <td><strong>${w.anzahl}</strong></td>
-        <td>${w.preis ? parseFloat(w.preis).toFixed(2)+'€' : '-'}</td>
+        <td>${w.preis ? parseFloat(w.preis).toFixed(2)+'€' : '-'}<button class="price-btn" onclick="openLookup(${w.id})" title="Preis online suchen">🔍</button></td>
         <td class="stars">${w.bewertung ? '⭐'.repeat(Math.round(w.bewertung)) : '-'}</td>
         <td style="color:${w.trinken_bis && w.trinken_bis < new Date().getFullYear() ? 'var(--danger)' : 'inherit'}">${w.trinken_bis || '-'}</td>
         <td>${esc(w.lagerort || '-')}</td>
@@ -356,6 +473,259 @@ function esc(s) { const d = document.createElement('div'); d.textContent = s; re
 
 // Init
 loadDashboard();
+
+
+// Preis-Lookup
+async function openLookup(id) {
+    const data = await fetch(API + '?action=preislookup&id=' + id).then(r => r.json());
+    if (data.error) { alert(data.error); return; }
+
+    const w = data.wein;
+    document.getElementById('lookup-name').textContent = w.name + (w.jahrgang ? ' ' + w.jahrgang : '');
+    document.getElementById('lookup-detail').textContent = [w.hersteller, w.rebsorte, w.land].filter(Boolean).join(' · ');
+    document.getElementById('lookup-current').innerHTML = w.preis
+        ? `<span style="color:var(--muted)">Dein Einkaufspreis:</span> <strong style="color:var(--accent)">${parseFloat(w.preis).toFixed(2)}€</strong>`
+        : '<span style="color:var(--muted)">Kein Preis hinterlegt</span>';
+
+    document.getElementById('lookup-links').innerHTML = data.links.map(l => `
+        <a href="${l.url}" target="_blank" rel="noopener" class="lookup-link">
+            <span class="ll-icon">${l.icon}</span>
+            <div>
+                <div class="ll-name">${l.name}</div>
+                <div class="ll-desc">Suche: "${data.suchbegriff}"</div>
+            </div>
+            <span class="ll-arrow">→</span>
+        </a>
+    `).join('');
+
+    document.getElementById('lookup-modal').classList.remove('hidden');
+}
+
+function closeLookup() {
+    document.getElementById('lookup-modal').classList.add('hidden');
+}
+
+// ESC schließt Modal
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLookup(); });
+
+// Analysen
+async function loadAnalysen() {
+    const data = await fetch(API + '?action=analysen').then(r => r.json());
+
+    // Diversität
+    const d = data.diversitaet;
+    document.getElementById('div-stats').innerHTML = `
+        <div class="stat-card"><div class="value">${d.rebsorten}</div><div class="label">Rebsorten</div></div>
+        <div class="stat-card"><div class="value">${d.laender}</div><div class="label">Länder</div></div>
+        <div class="stat-card"><div class="value">${d.regionen}</div><div class="label">Regionen</div></div>
+        <div class="stat-card"><div class="value">${d.hersteller}</div><div class="label">Hersteller</div></div>
+        <div class="stat-card"><div class="value">${d.jahrgaenge}</div><div class="label">Jahrgänge</div></div>
+    `;
+
+    // Trinkreife-Timeline
+    const trinkColors = {'Überfällig!':'var(--danger)','Dieses Jahr':'var(--warn)','Nächstes Jahr':'#fbbf24','2-3 Jahre':'var(--success)','4-5 Jahre':'#06b6d4','5+ Jahre':'#8b5cf6'};
+    document.getElementById('trinkreife-grid').innerHTML = (data.trinkreife || []).map(t => `
+        <div style="background:rgba(0,0,0,0.3);border-radius:8px;padding:14px;text-align:center;border-left:3px solid ${trinkColors[t.zeitfenster]||'var(--muted)'};">
+            <div style="font-size:1.4em;font-weight:bold;color:${trinkColors[t.zeitfenster]||'var(--text)'}">${t.flaschen}</div>
+            <div style="font-size:0.85em;color:var(--text);margin:4px 0;">${t.zeitfenster}</div>
+            <div style="font-size:0.75em;color:var(--muted);">${t.weine} Weine · ${t.wert ? t.wert+'€' : '-'}</div>
+        </div>
+    `).join('');
+
+    // Wert nach Land (Bar)
+    const colors = ['#e94560','#0f3460','#4ade80','#fbbf24','#8b5cf6','#06b6d4','#f97316','#ec4899','#84cc16','#6366f1'];
+    const barOpts = {responsive:true,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#888'}},y:{ticks:{color:'#888',callback:v=>v+'€'}}}};
+
+    if(charts['chart-wert-land']) charts['chart-wert-land'].destroy();
+    charts['chart-wert-land'] = new Chart(document.getElementById('chart-wert-land'), {
+        type:'bar',
+        data:{labels:data.wert_nach_land.map(d=>d.label),datasets:[{data:data.wert_nach_land.map(d=>+d.wert),backgroundColor:colors}]},
+        options:barOpts
+    });
+
+    // Wert nach Kategorie (Doughnut)
+    if(charts['chart-wert-kat']) charts['chart-wert-kat'].destroy();
+    charts['chart-wert-kat'] = new Chart(document.getElementById('chart-wert-kat'), {
+        type:'doughnut',
+        data:{labels:data.wert_nach_kategorie.map(d=>d.label+' ('+d.wert+'€)'),datasets:[{data:data.wert_nach_kategorie.map(d=>+d.wert),backgroundColor:colors}]},
+        options:{responsive:true,plugins:{legend:{labels:{color:'#eee',font:{size:11}}}}}
+    });
+
+    // Preissegmente (Bar)
+    if(charts['chart-preisseg']) charts['chart-preisseg'].destroy();
+    charts['chart-preisseg'] = new Chart(document.getElementById('chart-preisseg'), {
+        type:'bar',
+        data:{labels:data.preissegmente.map(d=>d.segment),datasets:[
+            {label:'Flaschen',data:data.preissegmente.map(d=>+d.flaschen),backgroundColor:'#e94560'},
+        ]},
+        options:{responsive:true,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#888'}},y:{ticks:{color:'#888'}}}}
+    });
+
+    // Alkohol (Bar)
+    if(charts['chart-alkohol']) charts['chart-alkohol'].destroy();
+    charts['chart-alkohol'] = new Chart(document.getElementById('chart-alkohol'), {
+        type:'bar',
+        data:{labels:data.alkohol.map(d=>d.label+'%'),datasets:[{data:data.alkohol.map(d=>+d.value),backgroundColor:'#8b5cf6'}]},
+        options:{responsive:true,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#888'}},y:{ticks:{color:'#888'}}}}
+    });
+
+    // Jahrzehnte Tabelle
+    document.getElementById('jahrzehnt-body').innerHTML = (data.jahrzehnte || []).map(j => `
+        <tr>
+            <td><strong>${j.jahrzehnt}</strong></td>
+            <td>${j.weine}</td>
+            <td>${j.flaschen}</td>
+            <td>${j.avg_preis ? j.avg_preis+'€' : '-'}</td>
+            <td class="stars">${j.avg_bewertung ? '⭐'.repeat(Math.round(j.avg_bewertung)) + ' ' + j.avg_bewertung : '-'}</td>
+            <td><strong>${j.wert ? j.wert+'€' : '-'}</strong></td>
+        </tr>
+    `).join('');
+
+    // Preis-Leistungs-Liste
+    document.getElementById('pl-list').innerHTML = (data.preis_leistung || []).map((w,i) => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px;border-bottom:1px solid rgba(255,255,255,0.05);${i<3?'background:rgba(74,222,128,0.08);border-radius:6px;':''}">
+            <div>
+                <span style="color:var(--muted);font-size:0.8em;margin-right:6px;">#${i+1}</span>
+                <strong>${esc(w.name)}</strong> ${w.jahrgang ? '<span style="color:var(--muted)">'+w.jahrgang+'</span>' : ''}
+                <div style="font-size:0.75em;color:var(--muted);">${w.kategorie||''} · ${w.land||''}</div>
+            </div>
+            <div style="text-align:right;">
+                <div>${w.preis}€ · ${'⭐'.repeat(Math.round(w.bewertung))}</div>
+                <div style="font-size:0.75em;color:var(--success);">Score: ${w.score}</div>
+            </div>
+        </div>
+    `).join('');
+
+    // Wertvollste Positionen
+    document.getElementById('wv-list').innerHTML = (data.wertvollste || []).map((w,i) => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px;border-bottom:1px solid rgba(255,255,255,0.05);${i<3?'background:rgba(233,69,96,0.08);border-radius:6px;':''}">
+            <div>
+                <span style="color:var(--muted);font-size:0.8em;margin-right:6px;">#${i+1}</span>
+                <strong>${esc(w.name)}</strong> ${w.jahrgang ? '<span style="color:var(--muted)">'+w.jahrgang+'</span>' : ''}
+                <div style="font-size:0.75em;color:var(--muted);">${w.hersteller||''} · ${w.land||''}</div>
+            </div>
+            <div style="text-align:right;">
+                <div style="font-size:1.1em;font-weight:bold;color:var(--accent);">${w.gesamtwert}€</div>
+                <div style="font-size:0.75em;color:var(--muted);">${w.anzahl}× à ${w.preis}€</div>
+            </div>
+        </div>
+    `).join('');
+}
+
+// Kellerwert-Verlauf
+async function loadVerlauf() {
+    const zeitraum = document.getElementById('verlauf-zeitraum').value;
+    const res = await fetch(API + '?action=kellerwert_verlauf&zeitraum=' + zeitraum).then(r => r.json());
+    const snaps = res.snapshots || [];
+
+    if (snaps.length === 0) {
+        document.getElementById('verlauf-empty').classList.remove('hidden');
+        document.getElementById('verlauf-stats').innerHTML = '';
+        return;
+    }
+    document.getElementById('verlauf-empty').classList.add('hidden');
+
+    // Stats
+    const v = res.veraenderung;
+    const last = snaps[snaps.length - 1];
+    const arrow = (val) => val > 0 ? '↑' : val < 0 ? '↓' : '→';
+    const color = (val) => val > 0 ? 'var(--success)' : val < 0 ? 'var(--danger)' : 'var(--muted)';
+
+    document.getElementById('verlauf-stats').innerHTML = `
+        <div class="stat-card">
+            <div class="value">${parseFloat(last.kellerwert).toFixed(0)}€</div>
+            <div class="label">Aktueller Kellerwert</div>
+        </div>
+        <div class="stat-card">
+            <div class="value">${last.gesamt_flaschen}</div>
+            <div class="label">Flaschen aktuell</div>
+        </div>
+        ${v ? `
+        <div class="stat-card">
+            <div class="value" style="color:${color(v.kellerwert)}">${arrow(v.kellerwert)} ${v.kellerwert > 0 ? '+' : ''}${v.kellerwert.toFixed(0)}€</div>
+            <div class="label">Wertänderung ${v.kellerwert_pct !== null ? '(' + (v.kellerwert_pct > 0 ? '+' : '') + v.kellerwert_pct + '%)' : ''}</div>
+        </div>
+        <div class="stat-card">
+            <div class="value" style="color:${color(v.flaschen)}">${arrow(v.flaschen)} ${v.flaschen > 0 ? '+' : ''}${v.flaschen}</div>
+            <div class="label">Flaschen-Änderung</div>
+        </div>
+        ` : ''}
+    `;
+
+    // Charts
+    const labels = snaps.map(s => s.datum);
+    const chartOpts = {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+            x: { ticks: { color: '#888', maxTicksLimit: 12 } },
+            y: { ticks: { color: '#888' }, beginAtZero: false }
+        },
+        elements: { point: { radius: snaps.length > 60 ? 0 : 3 }, line: { tension: 0.3 } }
+    };
+
+    // Kellerwert
+    if (charts['chart-verlauf-wert']) charts['chart-verlauf-wert'].destroy();
+    charts['chart-verlauf-wert'] = new Chart(document.getElementById('chart-verlauf-wert'), {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                data: snaps.map(s => parseFloat(s.kellerwert)),
+                borderColor: '#e94560',
+                backgroundColor: 'rgba(233,69,96,0.1)',
+                fill: true
+            }]
+        },
+        options: { ...chartOpts, scales: { ...chartOpts.scales, y: { ...chartOpts.scales.y, ticks: { color: '#888', callback: v => v + '€' } } } }
+    });
+
+    // Flaschen
+    if (charts['chart-verlauf-flaschen']) charts['chart-verlauf-flaschen'].destroy();
+    charts['chart-verlauf-flaschen'] = new Chart(document.getElementById('chart-verlauf-flaschen'), {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                data: snaps.map(s => parseInt(s.gesamt_flaschen)),
+                borderColor: '#4ade80',
+                backgroundColor: 'rgba(74,222,128,0.1)',
+                fill: true
+            }]
+        },
+        options: chartOpts
+    });
+
+    // Durchschnittspreis
+    if (charts['chart-verlauf-avg']) charts['chart-verlauf-avg'].destroy();
+    charts['chart-verlauf-avg'] = new Chart(document.getElementById('chart-verlauf-avg'), {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                data: snaps.map(s => parseFloat(s.durchschnitt_preis)),
+                borderColor: '#fbbf24',
+                backgroundColor: 'rgba(251,191,36,0.1)',
+                fill: true
+            }]
+        },
+        options: { ...chartOpts, scales: { ...chartOpts.scales, y: { ...chartOpts.scales.y, ticks: { color: '#888', callback: v => v.toFixed(0) + '€' } } } }
+    });
+}
+
+// Manueller Snapshot
+async function doSnapshot() {
+    try {
+        const res = await fetch('snapshot.php').then(r => r.json());
+        if (res.success) {
+            loadVerlauf();
+        } else {
+            alert('Fehler: ' + (res.error || 'Unbekannt'));
+        }
+    } catch(e) {
+        alert('Snapshot fehlgeschlagen — ggf. SNAPSHOT_KEY in config.php setzen.');
+    }
+}
 </script>
 </body>
 </html>

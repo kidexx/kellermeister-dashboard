@@ -196,6 +196,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['xml'])) {
     $db->prepare("INSERT INTO import_log (dateiname, zeilen_gesamt, zeilen_neu, zeilen_aktualisiert) VALUES (?, ?, ?, ?)")
         ->execute([$filename, $gesamt, $neu, $aktualisiert]);
 
+    // ── Snapshot nach Import erstellen ──
+    try {
+        require_once __DIR__ . '/snapshot.php';
+    } catch (Exception $e) {
+        // Snapshot-Fehler soll Import nicht blockieren
+        error_log('Snapshot nach Import fehlgeschlagen: ' . $e->getMessage());
+    }
+	
     echo json_encode([
         'success' => true,
         'gesamt' => $gesamt,
