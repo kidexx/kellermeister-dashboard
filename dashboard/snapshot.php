@@ -11,9 +11,12 @@
  */
 require_once __DIR__ . '/config.php';
 
+// Wenn als Include aufgerufen → kein Output
+$isIncluded = (basename($_SERVER['SCRIPT_FILENAME'] ?? '') !== 'snapshot.php');
+
 // Optional: einfacher API-Key-Schutz für Browser-Aufruf
 // define('SNAPSHOT_KEY', 'changeme'); // In config.php setzen
-if (php_sapi_name() !== 'cli' && defined('SNAPSHOT_KEY')) {
+if ((php_sapi_name() !== 'cli' && defined('SNAPSHOT_KEY')) and !$isIncluded) {
     if (($_GET['key'] ?? '') !== SNAPSHOT_KEY) {
         http_response_code(403);
         die('Unauthorized');
@@ -50,8 +53,6 @@ $db->exec($sql);
 
 $msg = "Snapshot für " . date('Y-m-d') . " gespeichert.";
 
-// Wenn als Include aufgerufen → kein Output
-$isIncluded = (basename($_SERVER['SCRIPT_FILENAME'] ?? '') !== 'snapshot.php');
 
 if (!$isIncluded) {
 	if (php_sapi_name() === 'cli') {
